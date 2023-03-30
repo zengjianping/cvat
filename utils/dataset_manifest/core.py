@@ -341,6 +341,10 @@ def _set_index(func):
             self.set_index()
     return wrapper
 
+class ImageProperties(dict):
+    def get_full_name(self):
+        return f"{self['name']}{self['extension']}"
+
 class _ManifestManager(ABC):
     BASE_INFORMATION = {
         'version' : 1,
@@ -376,7 +380,7 @@ class _ManifestManager(ABC):
                 offset = self._index[line]
                 manifest_file.seek(offset)
                 properties = manifest_file.readline()
-                parsed_properties = json.loads(properties)
+                parsed_properties = ImageProperties(json.loads(properties))
                 self._json_item_is_valid(**parsed_properties)
                 return parsed_properties
 
@@ -415,7 +419,7 @@ class _ManifestManager(ABC):
             line = manifest_file.readline()
             while line:
                 if line.strip():
-                    parsed_properties = json.loads(line)
+                    parsed_properties = ImageProperties(json.loads(line))
                     self._json_item_is_valid(**parsed_properties)
                     yield (image_number, parsed_properties)
                     image_number += 1

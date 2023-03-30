@@ -196,23 +196,52 @@ class MediaCache:
         return buff, mime_type
 
     def _prepare_context_image(self, db_data, frame_number):
+        def add_image_to_zip_file(zip_file: zipfile.ZipFile, file_path: str, img_path: str):
+            name = os.path.relpath(img_path, common_path).split('.', 1)[0]
+            image = cv2.imread(file_path)
+            success, result = cv2.imencode('.JPEG', image)
+            if not success:
+                raise Exception('Failed to encode image to ".jpeg" format')
+            zip_file.writestr(f'{name}.jpg', result.tobytes())
+
         zip_buffer = io.BytesIO()
         try:
             image = Image.objects.get(data_id=db_data.id, frame=frame_number)
         except Image.DoesNotExist:
             return None, None
+
+        common_path = os.path.commonpath(list(map(lambda x: str(x.path), image.related_files.all()))) \
+            if image.related_files.count() > 1 else os.path.dirname(str(image.related_files.first().path))
+
         with zipfile.ZipFile(zip_buffer, 'a', zipfile.ZIP_DEFLATED, False) as zip_file:
             if not image.related_files.count():
                 return None, None
-            common_path = os.path.commonpath(list(map(lambda x: str(x.path), image.related_files.all())))
-            for i in image.related_files.all():
-                path = os.path.realpath(str(i.path))
-                name = os.path.relpath(str(i.path), common_path)
-                image = cv2.imread(path)
-                success, result = cv2.imencode('.JPEG', image)
-                if not success:
-                    raise Exception('Failed to encode image to ".jpeg" format')
-                zip_file.writestr(f'{name}.jpg', result.tobytes())
+            if db_data.storage == StorageChoice.CLOUD_STORAGE:
+                db_cloud_storage = db_data.cloud_storage
+                if not db_cloud_storage:
+                    raise ValidationError('Cloud storage instance was deleted')
+                credentials = Credentials()
+                credentials.convert_from_db({
+                    'type': db_cloud_storage.credentials_type,
+                    'value': db_cloud_storage.credentials,
+                })
+                details = {
+                    'resource': db_cloud_storage.resource,
+                    'credentials': credentials,
+                    'specific_attributes': db_cloud_storage.get_specific_attributes()
+                }
+                cloud_storage_instance = get_cloud_storage_instance(cloud_provider=db_cloud_storage.provider_type, **details)
+                for i in image.related_files.all():
+                    path = str(i.path)
+
+                    with NamedTemporaryFile(mode='w+b', prefix='cvat', suffix=path.replace(os.path.sep, '#')) as temp_file:
+                        with cloud_storage_instance.download_fileobj(path) as buff_with_image:
+                            temp_file.write(buff_with_image.getvalue())
+                        add_image_to_zip_file(zip_file, temp_file.name, path)
+            else:
+                for i in image.related_files.all():
+                    path = os.path.realpath(str(i.path))
+                    add_image_to_zip_file(zip_file, path, str(i.path))
         buff = zip_buffer.getvalue()
         mime_type = 'application/zip'
         return buff, mime_type

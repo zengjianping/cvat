@@ -566,8 +566,13 @@ def _create_thread(
 
     related_images = {}
     if isinstance(extractor, MEDIA_TYPES['image']['extractor']):
-        extractor.filter(lambda x: not re.search(r'(^|{0})related_images{0}'.format(os.sep), x))
-        related_images = detect_related_images(extractor.absolute_source_paths, upload_dir)
+        if not is_data_in_cloud:
+            extractor.filter(lambda x: not re.search(r'(^|{0})related_images{0}'.format(os.sep), x))
+            related_images = detect_related_images(extractor.absolute_source_paths, upload_dir)
+        else:
+            for _, img_properties in manifest:
+                if (current_related_images := img_properties.get('meta', {}).get('related_images', [])):
+                    related_images[img_properties.get_full_name()] = current_related_images
 
     # Sort the files
     if (isBackupRestore and (
@@ -802,8 +807,9 @@ def _create_thread(
         models.Image.objects.bulk_create(db_images)
         created_images = models.Image.objects.filter(data_id=db_data.id)
 
+        prefix = upload_dir if not is_data_in_cloud else cloud_storage_manifest_prefix
         db_related_files = [
-            models.RelatedFile(data=image.data, primary_image=image, path=os.path.join(upload_dir, related_file_path))
+            models.RelatedFile(data=image.data, primary_image=image, path=os.path.join(prefix, related_file_path))
             for image in created_images
             for related_file_path in related_images.get(image.path, [])
         ]
