@@ -1,0 +1,128 @@
+services:
+  cvat_opa_debug:
+    container_name: cvat_opa_debug
+    image: openpolicyagent/opa:0.45.0-rootless
+    restart: always
+    command:
+      - run
+      - --server
+      - --log-level=error
+      - --set=services.cvat.url=http://localhost:7000
+      - --set=bundles.cvat.service=cvat
+      - --set=bundles.cvat.resource=/api/auth/rules
+      - --set=bundles.cvat.polling.min_delay_seconds=5
+      - --set=bundles.cvat.polling.max_delay_seconds=15
+    network_mode: host
+
+  cvat_db_debug:
+    container_name: cvat_db_debug
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: root
+      POSTGRES_DB: cvat
+      POSTGRES_HOST_AUTH_METHOD: trust
+    networks:
+      cvat_debug:
+        aliases:
+          - postgres
+    volumes:
+      - /home/nikita/Workspace/app.cvat.ai/cvat_db_12_09_2023:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  cvat_clickhouse_debug:
+    container_name: cvat_clickhouse_debug
+    image: clickhouse/clickhouse-server:22.3-alpine
+    restart: always
+    environment:
+      - CLICKHOUSE_DB=cvat
+      - CLICKHOUSE_USER=user
+      - CLICKHOUSE_PASSWORD=user
+    networks:
+      cvat_debug:
+        aliases:
+          - clickhouse
+    volumes:
+      - ./components/analytics/clickhouse/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
+    ports:
+      - "8123:8123"
+
+  cvat_vector_debug:
+    container_name: cvat_vector_debug
+    image: timberio/vector:0.26.0-alpine
+    restart: always
+    depends_on:
+      - cvat_clickhouse_debug
+    environment:
+      - CLICKHOUSE_DB=cvat
+      - CLICKHOUSE_USER=user
+      - CLICKHOUSE_PASSWORD=user
+      - CLICKHOUSE_HOST=clickhouse
+    networks:
+      cvat_debug:
+        aliases:
+          - vector
+    volumes:
+      - ./components/analytics/vector/vector.toml:/etc/vector/vector.toml:ro
+    ports:
+      - '8282:80'
+
+  cvat_grafana_debug:
+    image: grafana/grafana-oss:9.3.6
+    container_name: cvat_grafana_debug
+    environment:
+      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
+      - GF_AUTH_BASIC_ENABLED=false
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+      - GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=grafana-clickhouse-datasource
+      - GF_SERVER_HTTP_PORT=3001
+      - GF_SERVER_ROOT_URL=http://localhost
+      - GF_INSTALL_PLUGINS=https://github.com/grafana/clickhouse-datasource/releases/download/v2.0.7/grafana-clickhouse-datasource-2.0.7.linux_amd64.zip;grafana-clickhouse-datasource
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/all_events.json
+    volumes:
+      - ./components/analytics/grafana/dashboards/:/var/lib/grafana/dashboards/:ro
+    entrypoint:
+      - sh
+      - -euc
+      - |
+        mkdir -p /etc/grafana/provisioning/datasources
+        cat <<EOF > /etc/grafana/provisioning/datasources/ds.yaml
+        apiVersion: 1
+        datasources:
+          - name: 'ClickHouse'
+            type: 'grafana-clickhouse-datasource'
+            isDefault: true
+            jsonData:
+              defaultDatabase: cvat
+              port: 9000
+              server: clickhouse
+              username: user
+              tlsSkipVerify: false
+            secureJsonData:
+              password: user
+            editable: true
+        EOF
+        mkdir -p /etc/grafana/provisioning/dashboards
+        cat <<EOF > /etc/grafana/provisioning/dashboards/dashboard.yaml
+        apiVersion: 1
+        providers:
+          - name: cvat-logs
+            type: file
+            updateIntervalSeconds: 30
+            options:
+              path:  /var/lib/grafana/dashboards
+              foldersFromFilesStructure: true
+        EOF
+        exec /run.sh
+    networks:
+      cvat_debug:
+        aliases:
+          - grafana
+    ports:
+      - "3001:3001"
+
+networks:
+  cvat_debug:
