@@ -6,6 +6,11 @@ RUN apt-get update \
     && apt-get -y --no-install-recommends install python-is-python3 \
     && rm -rf /var/lib/apt/lists/*
 
+RUN pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/
+RUN pip config set global.timeout 3000
+RUN pip config set install.trusted-host mirrors.aliyun.com
+
+RUN python3 -m pip install --upgrade pip
 RUN pip install --no-cache-dir opencv-python-headless pillow pyyaml
 
 COPY model_loader.py shared.py /opt/nuclio/common/openvino/

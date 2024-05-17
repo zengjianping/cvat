@@ -182,6 +182,20 @@ spec:
     directives:
       preCopy:
         - kind: RUN
+          value: pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/
+        - kind: RUN
+          value: pip config set global.timeout 3000
+        - kind: RUN
+          value: pip config set install.trusted-host mirrors.aliyun.com
+        #- kind: RUN
+        #  value: cp /etc/apt/sources.list /etc/apt/sources.list.bak
+        #- kind: RUN
+        #  value: sed -i 's/archive.ubuntu.com/mirrors.aliyun.com/g' /etc/apt/sources.list
+        - kind: RUN
+          value: cp /etc/apt/sources.list.d/debian.sources /etc/apt/sources.list.d/debian.sources.bak
+        - kind: RUN
+          value: sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list.d/debian.sources
+        - kind: RUN
           value: apt update && apt install -y git libgl1 --no-install-recommends && rm -rf /var/lib/apt/lists/*
         - kind: WORKDIR
           value: /opt/nuclio
